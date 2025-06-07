@@ -13,9 +13,11 @@ app.get('/', (req, res) => {
 
 const userRoutes = require('./routes/userRoutes');
 const vehicleRoutes = require('./routes/vehicleRoutes');
+const slotRoutes = require('./routes/slotRoutes');
 
 app.use('/api', userRoutes);
 app.use('/api', vehicleRoutes);
+app.use('/api', slotRoutes);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
