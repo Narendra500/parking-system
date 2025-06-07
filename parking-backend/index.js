@@ -14,10 +14,12 @@ app.get('/', (req, res) => {
 const userRoutes = require('./routes/userRoutes');
 const vehicleRoutes = require('./routes/vehicleRoutes');
 const slotRoutes = require('./routes/slotRoutes');
+const bookingRoutes = require('./routes/bookingRoutes');
 
 app.use('/api', userRoutes);
 app.use('/api', vehicleRoutes);
 app.use('/api', slotRoutes);
+app.use('/api', bookingRoutes);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
