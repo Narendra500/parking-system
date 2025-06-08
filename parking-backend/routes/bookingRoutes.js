@@ -2,6 +2,48 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 
+let validStatusEnums;
+
+async function getEnumValues(tableName, columnName) {
+    const [rows] = await db.execute(
+        `SHOW COLUMNS FROM ${tableName} WHERE FIELD = ?`,
+        [columnName]
+    );
+    
+    const enumString = rows[0].Type;
+    return enumString
+        .match(/enum\((.+)\)/i)[1]
+        .split(',')
+        .map(value => value.replace(/'/g, '').trim().toLowerCase());
+}
+
+async function initializeEnums() {
+    try {
+        validStatusEnums = await getEnumValues('bookings', 'status');
+    } catch(err) {
+        console.error('Error loading enums: ', err);
+    }
+}
+
+initializeEnums();
+
+async function getBookingStatus(user_id, vehicle_id, slot_id) {
+    try {
+        const sql = `
+            SELECT status
+            FROM bookings
+            WHERE user_id = ? AND vehicle_id = ? AND slot_id = ?
+        `;
+        const params = [user_id, vehicle_id, slot_id];
+
+        const [results] = await db.query(sql, params);
+
+        return results.length? results[0].status : null;
+    } catch (err) {
+        console.log("error getting booking status:", err)
+    }
+}
+
 router.put('/bookings/:user_id/:vehicle_id/:slot_id/:fare', async (req, res) => {
     const { user_id, vehicle_id, slot_id, fare } = req.params;
     
@@ -32,22 +74,37 @@ router.put('/bookings/:user_id/:vehicle_id/:slot_id/:fare', async (req, res) => 
     }
 });
 
-async function getBookingStatus(user_id, vehicle_id, slot_id) {
+router.get('/bookings{/:status}', async (req, res) => {
+    const { status } = req.params;
+
     try {
+        let whereClause = "WHERE 1", params = [];
+        if (status) {
+            const statusList = status.split(',').map(s => s.trim().toLowerCase());
+
+            const invalidStatus = statusList.find(s => !validStatusEnums.includes(s));
+            if (invalidStatus) {
+                return res.status(400).json({ error: `Invalid status: ${invalidStatus}`, validStatuses: validStatusEnums});
+            }
+
+            const placeholders = statusList.map(() => '?').join(',');
+            whereClause += ` AND status IN (${placeholders})`;
+            params.push(...statusList);
+        }
+
         const sql = `
-            SELECT status
+            SELECT user_id, vehicle_id, slot_id, booking_time, checkin_time, checkout_time, fare, status
             FROM bookings
-            WHERE user_id = ? AND vehicle_id = ? AND slot_id = ?
+            ${whereClause}
         `;
-        const params = [user_id, vehicle_id, slot_id];
 
         const [results] = await db.query(sql, params);
 
-        return results.length? results[0].status : null;
+        res.status(200).json(results);
     } catch (err) {
-        console.log("error getting booking status:", err)
+        return res.status(500).json({error: err.message});
     }
-}
+});
 
 // update slot status to occupied and update checkin time. 
 router.patch('/bookings/:user_id/:vehicle_id/:slot_id/checkin', async (req, res) => {
