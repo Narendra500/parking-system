@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const formatDate = require('@utils/formatDate');
+const { updateBookingStatus } = require('@services/bookingService');
 
 let validStatusEnums;
 
@@ -131,68 +132,9 @@ router.patch('/bookings/:booking_id', async (req, res) => {
     if (!booking_id) 
         return res.status(400).json({message: 'need the booking_id to update CheckIn/ CheckOut timings'});
 
-    const bookingStatus = await getBookingStatus(booking_id);
+    const results = await updateBookingStatus(booking_id);
 
-    // handle booking not found.
-    if (!bookingStatus)
-        return res.status(404).json({error: 'No matching booking found'});
-
-    if (bookingStatus === 'Cancelled' || bookingStatus === 'Completed')
-        return res.status(400).json({error: `Booking ${bookingStatus}`});
-
-    let checkMethod, timingColumnToUpdate;
-    if (bookingStatus === 'Booked') {
-        timingColumnToUpdate = 'checkin_time';
-        checkMethod = 'CheckedIn';
-    } 
-    else if (bookingStatus === 'CheckedIn') {
-        timingColumnToUpdate = 'checkout_time';
-        checkMethod = 'Completed'; 
-    } 
-
-    try {
-        const sql = `
-            UPDATE bookings
-            SET ${timingColumnToUpdate} = CURRENT_TIMESTAMP, status = ?
-            WHERE id = ?
-        `;
-    
-        const params = [checkMethod, booking_id];
-
-        const [results] = await db.query(sql, params);
-
-        // also update the status of the slot to occupied if booking is updated
-        if (results.affectedRows === 0) {
-            return res.status(500).json({error: `Booking status: ${checkMethod} update error`});
-        } 
-        else {
-            try {
-                const slot_id = await getSlotId(booking_id);
-                let slotStatus = checkMethod === 'CheckedIn'? 'Occupied' : 'Available';
-
-                const updateSlotStatus = `
-                    UPDATE slots
-                    SET status = ?
-                    WHERE id = ?
-                `;
-                const slotParams = [slotStatus, slot_id];
-
-                const [slotResults] = await db.query(updateSlotStatus, slotParams);
-
-                if (slotResults.affectedRows === 0) {
-                    return res.status(404).json({message: `No slot found with this id: ${slot_id}`})
-                }
-                
-                return res.status(200).json({message: 'slot status and booking status updated successfully'});
-
-            } catch (slotErr) {
-                return res.status(500).json({error: slotErr.message, message: 'error in slot status update'});
-            }
-        }
-
-    } catch (err) {
-        return res.status(500).json({error: err, message: 'booking status update error'});
-    }
+    return res.status(results.code).json({message: results.message});
 })
 
 module.exports = router;
