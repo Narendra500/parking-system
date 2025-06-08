@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
+const formatDate = require('@utils/formatDate');
 
 // register a vehicle for a user
 router.post('/users/:user_id/vehicles', async (req, res) => {
@@ -100,8 +101,7 @@ router.get('/users/:user_id/vehicles', async (req, res) => {
 
     try {
         const sql = `
-            SELECT id, vehicle_number, vehicle_type, 
-            DATE_FORMAT(registered_at, '%Y-%m-%d %H:%i:%s') AS registered_at
+            SELECT id, vehicle_number, vehicle_type, ${formatDate('registered_at')}
             FROM vehicles
             WHERE user_id = ? AND is_deleted = 0
             ORDER BY registered_at DESC

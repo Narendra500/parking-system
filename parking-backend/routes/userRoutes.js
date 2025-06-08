@@ -1,11 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
+const formatDate = require('@utils/formatDate');
 
 router.get('/users', async (req, res) => {
     try {
         const sql = `
-            SELECT id, username, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at 
+            SELECT id, username, ${formatDate('created_at')}
             FROM users
         `;
         
