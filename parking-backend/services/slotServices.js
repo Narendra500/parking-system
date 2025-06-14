@@ -8,25 +8,14 @@ async function getSlotId(booking_id) {
 
 async function updateSlotStatus(slot_id, slot_status) {
     if (!slot_id || !slot_status) {
-        return { success: false, code: 404, message: `Slot ID/Status not given given.` };
+        throw new Error('Slot ID and status must be provided to update slot status.');
     }
 
-    try {
-        const updateSlotSql = `
-            UPDATE slots
-            SET status = ?
-            WHERE id = ?
-        `;
-        const [slotResult] = await db.query(updateSlotSql, [slot_status, slot_id]);
+    const updateSlotSql = `UPDATE slots SET status = ? WHERE id = ?`;
+    const [slotResult] = await db.query(updateSlotSql, [slot_status, slot_id]);
 
-        if (slotResult.affectedRows === 0) {
-            return { success: false, code: 400, error: `Failed to update slot status` };
-        }
-
-        return { success: true, code: 200, message: `Slot status updated to ${slot_status}` };
-
-    } catch (err) {
-        return {success: false, code: 500, error: `Error in updating slot status, ${err}`};
+    if (slotResult.affectedRows === 0) {
+        throw new Error(`Failed to update slot status for slot ID ${slot_id}. No rows affected.`);
     }
 }
 

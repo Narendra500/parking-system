@@ -55,6 +55,7 @@ router.post('/bookings', async (req, res) => {
         const [results] = await db.query(sql, params);
 
         if (results.affectedRows === 0) {
+            await db.rollback(); // not strictly necessary here, but better to close the transaction with rollback or commit.
             return res.status(409).json({ success: false, message: "Duplicate entry: Vehicle already has a slot or slot is taken." });
         }
 
@@ -83,7 +84,7 @@ router.get('/bookings{/:status}', async (req, res) => {
     const { status } = req.params;
 
     try {
-        let whereClause = "WHERE 1", params = [];
+        let whereClause = "", params = [];
         if (status) {
             const statusList = status.split(',').map(s => s.trim().toLowerCase());
 
@@ -93,7 +94,7 @@ router.get('/bookings{/:status}', async (req, res) => {
             }
 
             const placeholders = statusList.map(() => '?').join(',');
-            whereClause += ` AND status IN (${placeholders})`;
+            whereClause = `WHERE status IN (${placeholders})`;
             params.push(...statusList);
         }
 
@@ -107,56 +108,77 @@ router.get('/bookings{/:status}', async (req, res) => {
 
         res.status(200).json(results);
     } catch (err) {
-        return res.status(500).json({error: err.message});
+        console.error('Error fetching bookings:', err);
+        return res.status(500).json({ success: false, message: 'Internal server error', error: err.message });
     }
 });
 
 // update slot status and update checkin/checkout timing. 
 router.patch('/bookings/:booking_id', async (req, res) => {
-    const { booking_id} = req.params;
-    
-    if (!booking_id) 
-        return res.status(400).json({message: 'need the booking_id to update CheckIn/ CheckOut timings'});
+    const { booking_id } = req.params;
 
-    const oldStatus = await getBookingStatus(booking_id);
-
-    if (!oldStatus) 
-        return res.status(404).json({ error: 'No booking found with this booking id' });
-
-    if (oldStatus === 'Cancelled' || oldStatus === 'Completed') 
-        return res.status(400).json({ error: `Booking is already ${oldStatus}` });
-    
-
-    const checkMethod = oldStatus === 'Booked' ? 'checkin_time' : 'checkout_time';
-    const newStatus = oldStatus === 'Booked' ? 'CheckedIn' : 'Completed';
-    const slotStatus = newStatus === 'CheckedIn' ? 'Occupied' : 'Available';
-    let checkMethodTiming = 'CURRENT_TIMESTAMP';
-
-    const bookingResult = await updateBookingStatus(booking_id, newStatus, checkMethod, checkMethodTiming);
-
-    if (!bookingResult.success) 
-        return res.status(bookingResult.code).json({ error: bookingResult.error, message: 'Booking status update failed' });
-    
-    
-    // update slot status to reflect the new booking status
-    const slot_id = await getSlotId(booking_id);
-    const slotResult = await updateSlotStatus(slot_id, slotStatus);
-
-    if (slotResult.success) {
-        return res.status(200).json({ message: bookingResult.message + ', ' + slotResult.message });
-    } else {
-        // try to rollback the booking status update back to oldStatus.
-        try {
-         checkMethodTiming = 'NULL';
-
-            await updateBookingStatus(booking_id, oldStatus, checkMethod, checkMethodTiming); 
-            
-            return res.status(500).json({ message: 'Slot status not updated and rollbacked the booking status update', slot_update_error: slotResult.error, slot_error_code: slotResult.code });
-        
-        } catch (err) {
-            return res.status(500).json({ error: 'Slot status not updated and failed to rollback booking Status update', slot_update_error: slotResult.error, slot_error_code: slotResult.code });
-        }
+    if (!booking_id) {
+        return res.status(400).json({ success: false, message: 'Booking ID is required to update timings.' });
     }
-})
+
+    try {
+        await db.beginTransaction();
+
+        const oldStatus = await getBookingStatus(booking_id);
+
+        if (!oldStatus) {
+            await db.rollback(); 
+            return res.status(404).json({ success: false, message: 'No booking found with this ID.' });
+        }
+
+        // constants instead of string for comparisons
+        const CANCELLED = 'cancelled';
+        const COMPLETED = 'completed';
+        const BOOKED = 'booked';
+        const CHECKED_IN = 'checkedin';
+        const OCCUPIED = 'occupied';
+        const AVAILABLE = 'available';
+
+        const lowerOldStatus = oldStatus.toLowerCase(); // Convert to lowercase for consistent comparison
+
+        if (lowerOldStatus === CANCELLED || lowerOldStatus === COMPLETED) {
+            await db.rollback();
+            return res.status(400).json({ success: false, message: `Booking is already ${oldStatus}. Cannot update.` });
+        }
+
+        let checkMethod, newStatus, slotStatus;
+
+        if (lowerOldStatus === BOOKED) {
+            checkMethod = 'checkin_time';
+            newStatus = CHECKED_IN;
+            slotStatus = OCCUPIED;
+        } else if (lowerOldStatus === CHECKED_IN) {
+            checkMethod = 'checkout_time';
+            newStatus = COMPLETED;
+            slotStatus = AVAILABLE;
+        } 
+
+        await updateBookingStatus(booking_id, newStatus, checkMethod, 'CURRENT_TIMESTAMP');
+        
+        const slot_id = await getSlotId(booking_id);
+        if (!slot_id) {
+            await db.rollback();
+            return res.status(404).json({ success: false, message: 'Could not find associated slot for booking.' });
+        }
+
+        await updateSlotStatus(slot_id, slotStatus);
+
+        await db.commit();
+        return res.status(200).json({ success: true, message: `Booking status updated to ${newStatus} and slot status updated to ${slotStatus}.` });
+
+    } catch (err) { // service errors are also handled here.
+        await db.rollback(); 
+        console.error('Error updating booking/slot status:', err);
+        if (err.message.includes('No rows affected')) {
+            return res.status(400).json({ success: false, message: err.message });
+        }
+        return res.status(500).json({ success: false, message: 'An unexpected internal server error occurred.', error: err.message });
+    }
+});
 
 module.exports = router;

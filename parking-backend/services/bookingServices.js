@@ -7,35 +7,28 @@ async function getBookingStatus(booking_id) {
 }
 
 async function updateBookingStatus(booking_id, status, checkMethod, checkMethodTiming) {
-    try {
-        let updateBookingSql;
-        
-        if (checkMethodTiming === 'CURRENT_TIMESTAMP') {
-            updateBookingSql = `
-                UPDATE bookings
-                SET ${checkMethod} = CURRENT_TIMESTAMP, status = ?
-                WHERE id = ?
-            `;
-        } else if (checkMethodTiming === 'NULL') {
-            updateBookingSql = `
-                UPDATE bookings
-                SET ${checkMethod} = NULL, status = ?
-                WHERE id = ? 
-            `;
-        } else {
-            return { success: false, code: 400, error: 'wrong checkMethodTiming given for updateBookingStatus()'};
-        }     
-            
-        const [bookingResult] = await db.query(updateBookingSql, [status, booking_id]);
+    let updateBookingSql;
 
-        if (bookingResult.affectedRows === 0) {
-            return { success: false, code: 500, error: `Failed to update booking to ${status}` };
-        }
-        
-        return {success: true, code: 200, message: `Updated booking status to ${status}`}
+    if (checkMethodTiming === 'CURRENT_TIMESTAMP') {
+        updateBookingSql = `
+            UPDATE bookings 
+            SET ${checkMethod} = CURRENT_TIMESTAMP, status = ? 
+            WHERE id = ?
+        `;
+    } else if (checkMethodTiming === 'NULL') {
+        updateBookingSql = `
+            UPDATE bookings 
+            SET ${checkMethod} = NULL, status = ? 
+            WHERE id = ?
+        `;
+    } else {
+        throw new Error('Invalid checkMethodTiming provided for updateBookingStatus().');
+    }
 
-    } catch (err) {
-        return { success: false, code: 500, error: err.message };
+    const [bookingResult] = await db.query(updateBookingSql, [status, booking_id]);
+
+    if (bookingResult.affectedRows === 0) {
+        throw new Error(`Failed to update booking to ${status}. No rows affected.`);
     }
 }
 
