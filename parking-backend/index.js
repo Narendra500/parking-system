@@ -1,4 +1,5 @@
 require('module-alias/register');
+// require('@jobs/bookingCleanupJob');
 const express = require('express');
 const cors = require('cors');
 require('dotenv').config();

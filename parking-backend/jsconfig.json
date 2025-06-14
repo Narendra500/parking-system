@@ -4,7 +4,8 @@
     "paths": {
       "@utils/*": ["utils/*"],
       "@services/*": ["services/*"],
-      "@routes/*": ["routes/*"]
+      "@routes/*": ["routes/*"],
+      "@jobs/*": ["jobs/*"]
     }
   },
   "exclude": ["node_modules"]

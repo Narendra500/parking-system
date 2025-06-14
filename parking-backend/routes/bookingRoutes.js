@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const formatDate = require('@utils/formatDate');
-const { updateBookingStatus } = require('@services/bookingService');
+const { updateBookingStatus, getBookingStatus } = require('@services/bookingServices');
+const { updateSlotStatus, getSlotId } = require('@services/slotServices');
 
 let validStatusEnums;
 
@@ -29,70 +30,55 @@ async function initializeEnums() {
 
 initializeEnums();
 
-async function getSlotId(booking_id) {
-    try {
-        const sql = `
-            SELECT slot_id
-            FROM bookings
-            WHERE id = ?
-        `;
+// add a booking
+router.post('/bookings', async (req, res) => { 
+    const { user_id, vehicle_id, slot_id, fare } = req.body; 
 
-        const params = [booking_id];
-
-        const results = await db.query(sql, params);
-        return results[0][0].slot_id;
-    } catch (err) {
-        console.log("Error getting slot_id from booking id: ", err);
+    if (!user_id || !vehicle_id || !slot_id || !fare) {
+        return res.status(400).json({ success: false, message: 'Missing required fields: user_id, vehicle_id, slot_id, and fare' });
     }
-}
 
-async function getBookingStatus(booking_id) {
     try {
-        const sql = `
-            SELECT status
-            FROM bookings
-            WHERE id = ?
-        `;
-        const params = [booking_id];
+        await db.beginTransaction(); 
 
-        const [results] = await db.query(sql, params);
-
-        return results.length? results[0].status : null;
-    } catch (err) {
-        console.log("error getting booking status:", err)
-    }
-}
-
-router.put('/bookings/:user_id/:vehicle_id/:slot_id/:fare', async (req, res) => {
-    const { user_id, vehicle_id, slot_id, fare } = req.params;
-    
-    if (!user_id || !vehicle_id || !slot_id || !fare) 
-        return res.status(400).json({message: 'need these fields user_id, vehicle_id, slot_id and fare'});
-
-    try {   
-        // insert only if vehicle is not already granted a slot.
         const sql = `
             INSERT INTO bookings(user_id, vehicle_id, slot_id, fare)
             SELECT ?, ?, ?, ?
             WHERE NOT EXISTS (
-                SELECT 1 
+                SELECT 1
                 FROM bookings
                 WHERE (user_id = ? AND vehicle_id = ?) OR slot_id = ?
             )
-        `;    
-
+        `;
         const params = [user_id, vehicle_id, slot_id, fare, user_id, vehicle_id, slot_id];
 
         const [results] = await db.query(sql, params);
-        if (results.affectedRows === 0) 
-            return res.status(409).json({error: "duplicate entry ignored"});
 
-        return res.status(200).json({message: "booking successful"});
+        if (results.affectedRows === 0) {
+            return res.status(409).json({ success: false, message: "Duplicate entry: Vehicle already has a slot or slot is taken." });
+        }
+
+        const newBookingId = results.insertId;
+        const slot_id = getSlotId(newBookingId);
+        
+        const slot_result = await updateSlotStatus(slot_id);
+        
+        if (!slot_result.success) {
+            await db.rollback();
+            return res.status(500).json({success: false, message: 'slot status update failure, transaction rolled back'});
+        }
+
+        await db.commit(); 
+
+        return res.status(201).json({ success: true, message: "Booking successful", booking_id: newBookingId }); // 201 Created
     } catch (err) {
-        return res.status(500).json({error: err.message});
+        await db.rollback();
+        console.error('Error creating booking:', err);
+        return res.status(500).json({ success: false, message: 'Internal server error', error: err.message });
     }
 });
 
+// get bookings filtered by optional status
 router.get('/bookings{/:status}', async (req, res) => {
     const { status } = req.params;
 
@@ -132,9 +118,45 @@ router.patch('/bookings/:booking_id', async (req, res) => {
     if (!booking_id) 
         return res.status(400).json({message: 'need the booking_id to update CheckIn/ CheckOut timings'});
 
-    const results = await updateBookingStatus(booking_id);
+    const oldStatus = await getBookingStatus(booking_id);
 
-    return res.status(results.code).json({message: results.message});
+    if (!oldStatus) 
+        return res.status(404).json({ error: 'No booking found with this booking id' });
+
+    if (oldStatus === 'Cancelled' || oldStatus === 'Completed') 
+        return res.status(400).json({ error: `Booking is already ${oldStatus}` });
+    
+
+    const checkMethod = oldStatus === 'Booked' ? 'checkin_time' : 'checkout_time';
+    const newStatus = oldStatus === 'Booked' ? 'CheckedIn' : 'Completed';
+    const slotStatus = newStatus === 'CheckedIn' ? 'Occupied' : 'Available';
+    let checkMethodTiming = 'CURRENT_TIMESTAMP';
+
+    const bookingResult = await updateBookingStatus(booking_id, newStatus, checkMethod, checkMethodTiming);
+
+    if (!bookingResult.success) 
+        return res.status(bookingResult.code).json({ error: bookingResult.error, message: 'Booking status update failed' });
+    
+    
+    // update slot status to reflect the new booking status
+    const slot_id = await getSlotId(booking_id);
+    const slotResult = await updateSlotStatus(slot_id, slotStatus);
+
+    if (slotResult.success) {
+        return res.status(200).json({ message: bookingResult.message + ', ' + slotResult.message });
+    } else {
+        // try to rollback the booking status update back to oldStatus.
+        try {
+         checkMethodTiming = 'NULL';
+
+            await updateBookingStatus(booking_id, oldStatus, checkMethod, checkMethodTiming); 
+            
+            return res.status(500).json({ message: 'Slot status not updated and rollbacked the booking status update', slot_update_error: slotResult.error, slot_error_code: slotResult.code });
+        
+        } catch (err) {
+            return res.status(500).json({ error: 'Slot status not updated and failed to rollback booking Status update', slot_update_error: slotResult.error, slot_error_code: slotResult.code });
+        }
+    }
 })
 
 module.exports = router;

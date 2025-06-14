@@ -16,6 +16,7 @@
     "express": "^5.1.0",
     "module-alias": "^2.2.3",
     "mysql2": "^3.14.1",
+    "node-cron": "^4.1.0",
     "qrcode": "^1.5.4"
   },
   "devDependencies": {
@@ -24,6 +25,7 @@
   "_moduleAliases": {
     "@utils": "utils",
     "@services": "services",
-    "@routes": "routes"
+    "@routes": "routes",
+    "@jobs": "jobs"
   }
 }
