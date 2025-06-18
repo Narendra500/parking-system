@@ -5,6 +5,16 @@ const formatDate = require('@utils/formatDate');
 const { updateBookingStatus, getBookingStatus } = require('@services/bookingServices');
 const { updateSlotStatus, getSlotId } = require('@services/slotServices');
 
+// constants instead of string for comparisons
+const CANCELLED = 'cancelled';
+const COMPLETED = 'completed';
+const BOOKED = 'booked';
+const CHECKED_IN = 'checkedin';
+const BOOKING_TIME = 'booking_time';
+const CHECKIN_TIME = 'checkin_time';
+const CHECKOUT_TIME = 'checkout_time';
+const OCCUPIED = 'occupied';
+const AVAILABLE = 'available';
 let validStatusEnums;
 
 async function getEnumValues(tableName, columnName) {
@@ -79,6 +89,26 @@ router.post('/bookings', async (req, res) => {
     }
 });
 
+// get bookings by user_id
+router.get('/bookings/:user_id', async (req, res) => {
+    const { user_id } = req.params;
+    try {
+        const sql = `
+            SELECT id AS booking_id, vehicle_id, slot_id,
+            ${formatDate(BOOKING_TIME, CHECKIN_TIME, CHECKOUT_TIME)},
+            status, fare
+            FROM bookings
+            WHERE user_id = ?
+            ORDER BY booking_time DESC
+        `;
+        const [results] = await db.query(sql, [user_id]);
+        res.status(200).json(results);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+
 // get bookings filtered by optional status
 router.get('/bookings{/:status}', async (req, res) => {
     const { status } = req.params;
@@ -99,7 +129,7 @@ router.get('/bookings{/:status}', async (req, res) => {
         }
 
         const sql = `
-            SELECT user_id, vehicle_id, slot_id, ${formatDate('booking_time', 'checkin_time', 'checkout_time')}, fare, status
+            SELECT id AS booking_id, user_id, vehicle_id, slot_id, ${formatDate('booking_time', 'checkin_time', 'checkout_time')}, fare, status
             FROM bookings
             ${whereClause}
         `;
@@ -130,14 +160,6 @@ router.patch('/bookings/:booking_id', async (req, res) => {
             await db.rollback(); 
             return res.status(404).json({ success: false, message: 'No booking found with this ID.' });
         }
-
-        // constants instead of string for comparisons
-        const CANCELLED = 'cancelled';
-        const COMPLETED = 'completed';
-        const BOOKED = 'booked';
-        const CHECKED_IN = 'checkedin';
-        const OCCUPIED = 'occupied';
-        const AVAILABLE = 'available';
 
         const lowerOldStatus = oldStatus.toLowerCase(); // Convert to lowercase for consistent comparison
 
@@ -180,5 +202,26 @@ router.patch('/bookings/:booking_id', async (req, res) => {
         return res.status(500).json({ success: false, message: 'An unexpected internal server error occurred.', error: err.message });
     }
 });
+
+router.delete('/bookings/:booking_id', async (req, res) => {
+    const { booking_id } = req.params;
+    try {
+        const sql = `
+            UPDATE bookings
+            SET status = 'Cancelled'
+            WHERE id = ? AND status = 'Booked'
+        `;
+        const [result] = await db.query(sql, [booking_id]);
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ error: 'Booking not found or already used' });
+        }
+
+        res.status(200).json({ message: 'Booking cancelled successfully' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 
 module.exports = router;
