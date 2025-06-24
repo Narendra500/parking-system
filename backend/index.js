@@ -18,10 +18,10 @@ const vehicleRoutes = require('./routes/vehicleRoutes');
 const slotRoutes = require('./routes/slotRoutes');
 const bookingRoutes = require('./routes/bookingRoutes');
 
-app.use('/api', userRoutes);
-app.use('/api', vehicleRoutes);
-app.use('/api', slotRoutes);
-app.use('/api', bookingRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/vehicles', vehicleRoutes);
+app.use('/api/slots', slotRoutes);
+app.use('/api/bookings', bookingRoutes);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

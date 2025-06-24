@@ -25,6 +25,7 @@
   "_moduleAliases": {
     "@utils": "utils",
     "@services": "services",
+    "@controllers": "controllers",
     "@routes": "routes",
     "@jobs": "jobs"
   }
